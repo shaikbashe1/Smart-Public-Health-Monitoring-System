@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pediatric Health Monitor - App</title>
+    
+    <!-- External Libraries for Real-time Data and Charting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    
+    <style>
+        /* Mobile-First, App-Like UI */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #eef2f7; 
+            padding: 0; 
+            margin: 0; 
+            color: #2c3e50; 
+            display: flex;
+            justify-content: center;
+        }
+        .app-container {
+            width: 100%;
+            max-width: 500px; 
+            min-height: 100vh;
+            background: white;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        header { text-align: center; padding-bottom: 20px; border-bottom: 1px solid #eee; }
+        header h1 { font-size: 1.6em; margin: 0; color: #3498db; }
+        header p { margin: 5px 0 0; font-size: 0.9em; color: #7f8c8d; }
+
+        .device-info { 
+            background: #f7f9fb; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-top: 15px; 
+            text-align: center;
+            font-size: 0.9em;
+            word-break: break-word; 
+        }
+        .device-info strong { color: #2c3e50; }
+        .location-text { display: block; margin-top: 5px; color: #555; }
+
+        .alert-box { 
+            background-color: #fbedeb; 
+            border-left: 5px solid #e74c3c; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 20px 0; 
+            color: #c0392b; 
+            font-weight: 600;
+            display: none;
+            box-shadow: 0 2px 5px rgba(231, 76, 60, 0.2);
+            transition: all 0.3s ease;
+        }
+        .alert-box.active {
+            animation: pulse 1s infinite;
+        }
+
+        .risk-score-card {
+            background-color: #fff3e0;
+            border: 1px solid #ffcc80;
+            color: #d35400;
+        }
+        
+        .risk-value { font-size: 3em; font-weight: 700; color: #d35400; }
+
+        .vitals-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .indicator-card { 
+            background: #ffffff; 
+            padding: 15px 10px; 
+            border-radius: 12px; 
+            text-align: center; 
+            margin-bottom: 5px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            border: 1px solid #ecf0f1;
+        }
+        .value { font-size: 2.2em; font-weight: 700; margin: 2px 0; }
+        .value.ph { color: #3498db; }
+        .value.amylase { color: #e74c3c; }
+        .value.temp { color: #f39c12; }
+        .value.battery { color: #27ae60; }
+        
+        .chart-section { margin-top: 30px; }
+        .chart-container { height: 200px; margin-bottom: 20px; }
+
+        .blockchain-log {
+            margin-top: 30px;
+            padding: 15px;
+            background: #e1f5fe;
+            border-radius: 8px;
+            font-size: 0.8em;
+        }
+        .blockchain-log h3 { color: #2980b9; margin-top: 0; }
+        .tx-id { font-family: monospace; overflow-wrap: break-word; }
+
+
+        /* Animation for alerts */
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.01); opacity: 0.95; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Saliva Health Monitor</h1>
+            <p>Real-time Pediatric Health & Environment Surveillance</p>
+        </header>
+
+        <div class="device-info">
+            Monitoring: <strong>ChildMonitor_A001</strong>
+            <span class="location-text">
+                Location: <span id="location-display">--</span> 
+                | Battery: <span id="battery-display">--%</span>
+            </span>
+        </div>
+
+        <div id="alert-display" class="alert-box">
+            <span id="alert-message"></span>
+            <p style="margin-top: 10px; font-size: 0.8em; text-align: right;">Time: <span id="alert-time">--</span></p>
+        </div>
+
+        <section class="vitals-dashboard">
+            <h2>AI Predictive Risk</h2>
+            <div class="indicator-card risk-score-card">
+                <h3>Immediate Risk Score (0-100)</h3>
+                <div class="risk-value" id="risk-display">--</div>
+                <p style="font-size: 0.8em; color: #d35400;">AI model assessment for proactive care.</p>
+            </div>
+            
+            <h2>Current Sensor Readings</h2>
+            <div class="vitals-grid">
+                <div class="indicator-card">
+                    <h3>Saliva pH</h3>
+                    <div class="value ph" id="ph-display">--</div>
+                    <p style="font-size: 0.7em; color: #7f8c8d;">(Hydration/Balance)</p>
+                </div>
+                
+                <div class="indicator-card">
+                    <h3>Amylase (U/L)</h3>
+                    <div class="value amylase" id="amylase-display">--</div>
+                    <p style="font-size: 0.7em; color: #7f8c8d;">(Inflammation)</p>
+                </div>
+
+                <div class="indicator-card">
+                    <h3>Ambient Temp (°C)</h3>
+                    <div class="value temp" id="ambient-temp-display">--</div>
+                    <p style="font-size: 0.7em; color: #7f8c8d;">(Environment)</p>
+                </div>
+
+                <div class="indicator-card">
+                    <h3>Device Status</h3>
+                    <div class="value battery" id="status-display">LIVE</div>
+                    <p style="font-size: 0.7em; color: #7f8c8d;">(System Health)</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="chart-section">
+             <h2>Recent Trends</h2>
+            <div class="chart-container"><canvas id="phChart"></canvas></div>
+            <div class="chart-container"><canvas id="amylaseChart"></canvas></div>
+            <div class="chart-container"><canvas id="ambientTempChart"></canvas></div>
+        </section>
+        
+        <section class="blockchain-log">
+            <h3>Secure Data Log (Blockchain)</h3>
+            <p>Last Transaction ID: <span class="tx-id" id="tx-id-display">--</span></p>
+            <p style="margin: 5px 0 0; color: #2980b9;">All data is logged securely on the blockchain layer.</p>
+        </section>
+    </div>
+
+    <script>
+        const socket = io();
+        let phChart, amylaseChart, ambientTempChart;
+        const maxPoints = 20; 
+
+        function initCharts() {
+            const chartOptions = (color) => ({
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { 
+                        type: 'time', 
+                        time: { unit: 'second', displayFormats: { second: 'HH:mm:ss' } }, 
+                        grid: { display: false }
+                    },
+                    y: { 
+                        beginAtZero: false, 
+                        grid: { color: '#ecf0f1' }
+                    }
+                }
+            });
+            
+            phChart = new Chart(document.getElementById('phChart'), {
+                type: 'line', 
+                data: { labels: [], datasets: [{ label: 'Saliva pH', data: [], borderColor: '#3498db', tension: 0.4, borderWidth: 3, pointRadius: 3, backgroundColor: 'rgba(52, 152, 219, 0.1)' }] }, 
+                options: chartOptions('#3498db')
+            });
+
+            amylaseChart = new Chart(document.getElementById('amylaseChart'), {
+                type: 'line', 
+                data: { labels: [], datasets: [{ label: 'Amylase Level (U/L)', data: [], borderColor: '#e74c3c', tension: 0.4, borderWidth: 3, pointRadius: 3, backgroundColor: 'rgba(231, 76, 60, 0.1)' }] }, 
+                options: chartOptions('#e74c3c')
+            });
+
+            ambientTempChart = new Chart(document.getElementById('ambientTempChart'), {
+                type: 'line', 
+                data: { labels: [], datasets: [{ label: 'Ambient Temp (°C)', data: [], borderColor: '#f39c12', tension: 0.4, borderWidth: 3, pointRadius: 3, backgroundColor: 'rgba(243, 156, 18, 0.1)' }] }, 
+                options: chartOptions('#f39c12')
+            });
+        }
+
+        function updateVitals(data) {
+            const now = new Date();
+
+            // Update Sensor Data
+            document.getElementById('ph-display').innerText = data.salivaryPH.toFixed(2);
+            document.getElementById('amylase-display').innerText = data.amylaseLevel;
+            document.getElementById('ambient-temp-display').innerText = data.ambientTemp.toFixed(1) + '°C';
+            document.getElementById('battery-display').innerText = data.batteryLevel + '%';
+            document.getElementById('location-display').innerText = data.gpsCoordinates || data.location;
+            
+            // Update AI/Blockchain Data
+            document.getElementById('risk-display').innerText = data.predictiveRisk;
+            document.getElementById('tx-id-display').innerText = data.transactionId;
+            
+            // Update Status Display Color based on battery
+            const statusDisplay = document.getElementById('status-display');
+            if (data.batteryLevel < 20) {
+                statusDisplay.innerText = 'LOW BATT';
+                statusDisplay.style.color = '#e74c3c';
+            } else {
+                statusDisplay.innerText = 'LIVE';
+                statusDisplay.style.color = '#27ae60';
+            }
+
+            // Update risk score card color based on risk level
+            const riskCard = document.querySelector('.risk-score-card');
+            const riskValue = data.predictiveRisk;
+            if (riskValue > 60) {
+                riskCard.style.backgroundColor = '#fbedeb';
+                riskCard.style.color = '#c0392b';
+            } else if (riskValue > 30) {
+                riskCard.style.backgroundColor = '#fff9e6';
+                riskCard.style.color = '#d35400';
+            } else {
+                riskCard.style.backgroundColor = '#e8f5e9';
+                riskCard.style.color = '#27ae60';
+            }
+            
+            // Update Charts
+            phChart.data.labels.push(now);
+            phChart.data.datasets[0].data.push(data.salivaryPH);
+            
+            amylaseChart.data.labels.push(now);
+            amylaseChart.data.datasets[0].data.push(data.amylaseLevel);
+
+            ambientTempChart.data.labels.push(now);
+            ambientTempChart.data.datasets[0].data.push(data.ambientTemp);
+
+            // Trim old data points for real-time scrolling effect
+            if (phChart.data.labels.length > maxPoints) {
+                phChart.data.labels.shift();
+                phChart.data.datasets[0].data.shift();
+                amylaseChart.data.labels.shift();
+                amylaseChart.data.datasets[0].data.shift();
+                ambientTempChart.data.labels.shift();
+                ambientTempChart.data.datasets[0].data.shift();
+            }
+
+            phChart.update();
+            amylaseChart.update();
+            ambientTempChart.update();
+        }
+
+        // --- WebSocket Handlers ---
+        socket.on('vitals_update', function(data) {
+            updateVitals(data);
+        });
+
+        socket.on('alert_notification', function(alertData) {
+            const alertBox = document.getElementById('alert-display');
+            document.getElementById('alert-message').innerHTML = alertData.message;
+            document.getElementById('alert-time').innerText = alertData.time;
+            
+            alertBox.style.display = 'block';
+            alertBox.classList.add('active'); 
+
+            // Simulate clearing the alert after a short time
+            setTimeout(() => {
+                alertBox.classList.remove('active'); 
+            }, 3000);
+            
+            console.warn("NOTIFICATION:", alertData.message);
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', initCharts);
+    </script>
+</body>
+</html>
