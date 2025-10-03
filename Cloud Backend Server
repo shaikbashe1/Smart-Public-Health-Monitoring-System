@@ -1,0 +1,98 @@
+import json
+from flask import Flask, jsonify, render_template
+from flask_socketio import SocketIO, emit
+import paho.mqtt.client as mqtt 
+import threading # Use threading for the MQTT listener loop
+
+# =========================================================
+# !!! CRITICAL: REPLACE THESE CONFIGURATION VALUES !!!
+# =========================================================
+MQTT_BROKER_HOST = "YOUR_MQTT_BROKER_IP" 
+MQTT_PORT = 1883
+MQTT_TOPIC = "pediatric/saliva/data"
+# =========================================================
+
+# --- Flask & SocketIO Setup ---
+app = Flask(__name__, template_folder='templates') # Ensure Flask looks in 'templates' folder
+app.config['SECRET_KEY'] = 'secure_hackathon_key_123' 
+# Allow all origins for easier hackathon setup
+socketio = SocketIO(app, cors_allowed_origins="*") 
+
+# --- Alert Thresholds (Core Logic) ---
+PH_ALERT_THRESHOLD_LOW = 6.5  
+AMYLASE_ALERT_THRESHOLD_HIGH = 250 
+
+mqtt_client = mqtt.Client()
+
+def on_connect(client, userdata, flags, rc):
+    """Callback when the MQTT client connects."""
+    print(f"Connected to MQTT Broker with result code {rc}. Subscribing to: {MQTT_TOPIC}")
+    client.subscribe(MQTT_TOPIC)
+
+def on_message(client, userdata, msg):
+    """Callback when an MQTT message is received (from the IoT device)."""
+    try:
+        # Need to use socketio.start_background_task here if running in a production ASGI server, 
+        # but standard thread safety for emissions in Flask-SocketIO is usually sufficient for a hackathon.
+        payload = json.loads(msg.payload.decode())
+        
+        device_id = payload.get('deviceId')
+        salivary_ph = payload.get('salivaryPH')
+        amylase_level = payload.get('amylaseLevel')
+        
+        print(f"[{device_id}] Received: pH={salivary_ph:.2f}, Amylase={amylase_level}")
+
+        # 1. Emit data to the connected web dashboard (Data Visualization)
+        socketio.emit('vitals_update', payload)
+
+        # 2. Real-time Alerting Logic
+        alert_message = None
+        
+        if salivary_ph < PH_ALERT_THRESHOLD_LOW:
+            alert_message = f"CRITICAL: Low Saliva pH ({salivary_ph:.2f}) - Potential Dehydration/Acidosis."
+            
+        if amylase_level > AMYLASE_ALERT_THRESHOLD_HIGH:
+            if alert_message:
+                 alert_message += f" | High Amylase ({amylase_level}) - Inflammation Watch."
+            else:
+                 alert_message = f"HIGH ALERT: Amylase Level elevated ({amylase_level}) - Inflammation Watch."
+
+        # 3. Alert Action
+        if alert_message:
+            full_alert = {
+                'message': alert_message, 
+                'device_id': device_id,
+                'time': datetime.now().strftime("%H:%M:%S")
+            }
+            print(f"*** ALERT TRIGGERED for {device_id}: {alert_message} ***")
+            # Emit alert to the dashboard and parents/providers (Mobile App/Notification Simulation)
+            socketio.emit('alert_notification', full_alert)
+
+    except Exception as e:
+        print(f"Error processing MQTT message: {e}")
+
+# Set up MQTT client callbacks
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+
+@app.route('/')
+def index():
+    """Route to serve the main dashboard HTML."""
+    return render_template('index.html') 
+
+@socketio.on('connect')
+def handle_connect():
+    print('Web client connected via SocketIO')
+
+if __name__ == '__main__':
+    # Connect and start the MQTT background listener
+    mqtt_client.connect(MQTT_BROKER_HOST, MQTT_PORT, 60)
+    # Use thread to ensure the MQTT loop doesn't block the Flask web server
+    mqtt_thread = threading.Thread(target=mqtt_client.loop_forever)
+    mqtt_thread.start() 
+    
+    print("Starting Flask server on http://127.0.0.1:5000...")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+
+# Installation: pip install flask flask-socketio paho-mqtt
+# Run: python cloud_server.py
